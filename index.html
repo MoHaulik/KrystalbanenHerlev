@@ -1,0 +1,926 @@
+<!DOCTYPE html>
+<html lang="da">
+<head>
+  <meta charset="utf-8">
+  <title>Krystalbanen NXT/Care</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+  <style>
+    :root {
+      /* NXT/Care Colors */
+      --sky-100: #e0f2fe;
+      /* Variant 21 Color: The selected soft purple/blue */
+      --sky-500: #8bb1e9; 
+      
+      /* Physics */
+      --spring: 0.6s cubic-bezier(0.175, 0.885, 0.32, 1.25);
+      
+      /* MASSIVE Target Sizes */
+      --btn-size: clamp(220px, 35vw, 450px);
+      /* Variant 21 Icon Scale: 1.6x the original size */
+      --icon-size: clamp(128px, 19.2vw, 256px); 
+    }
+
+    * { 
+      margin: 0; 
+      padding: 0; 
+      box-sizing: border-box; 
+      -webkit-tap-highlight-color: transparent; 
+    }
+    
+    body, html {
+      width: 100%; 
+      height: 100%;
+      overflow: hidden;
+      font-family: -apple-system, BlinkMacSystemFont, "SF Pro Rounded", "Segoe UI", Roboto, sans-serif;
+      background: var(--sky-100);
+    }
+
+    #overlay {
+      position: absolute; top: 0; left: 0; width: 100%; height: 100%;
+      display: flex; flex-direction: column; align-items: center; justify-content: center; z-index: 1;
+      background: var(--sky-100);
+    }
+
+    /* Universal Play Icon SVG Styles */
+    .play-svg {
+      width: var(--icon-size);
+      height: var(--icon-size);
+      fill: currentColor;
+      margin-left: 10%; /* Optical centering for the play triangle */
+      transition: all var(--spring);
+    }
+
+    /* ==========================================================================
+       THE "LIQUID SKY PUDDLE" BUTTON
+       ========================================================================== */
+    .xr-btn {
+      position: relative;
+      cursor: pointer; 
+      outline: none; 
+      border: none;
+      display: flex; 
+      align-items: center; 
+      justify-content: center;
+      text-decoration: none; 
+      user-select: none;
+      transition: all var(--spring);
+      
+      /* Specific Shape & Colors */
+      width: calc(var(--btn-size) * 1.2); 
+      height: calc(var(--btn-size) * 1.1);
+      border-radius: 60% 40% 40% 60% / 50% 60% 40% 50%;
+      background: var(--sky-100); 
+      color: var(--sky-500);
+      box-shadow: inset 15px 15px 30px #b9ddf5, inset -15px -15px 30px #ffffff;
+    }
+    
+    .xr-btn:hover:not(:disabled) { 
+      border-radius: 50%; 
+      transform: scale(1.05); 
+      background: var(--sky-500); 
+      color: var(--sky-100); 
+      box-shadow: 15px 15px 30px #b9ddf5, -15px -15px 30px #ffffff; 
+    }
+
+    .xr-btn:active:not(:disabled) {
+      transform: scale(0.95);
+    }
+
+    .xr-btn:disabled {
+      opacity: 0.6;
+      cursor: not-allowed;
+      filter: grayscale(0.2);
+    }
+
+    #toast {
+      position: fixed;
+      bottom: -100px;
+      left: 50%;
+      transform: translateX(-50%);
+      background: var(--sky-500);
+      color: white;
+      padding: 16px 32px;
+      border-radius: 50px;
+      font-weight: 600;
+      font-size: 1.1rem;
+      box-shadow: 0 10px 25px rgba(139, 177, 233, 0.4);
+      transition: all 0.4s cubic-bezier(0.175, 0.885, 0.32, 1.25);
+      z-index: 1000;
+      pointer-events: none;
+    }
+    
+    #toast.show {
+      bottom: 60px;
+    }
+
+    .exit-ar {
+      position: fixed; top: 20px; right: 20px; background: rgba(255, 255, 255, 0.25);
+      color: white; border: none; border-radius: 50%; width: 50px; height: 50px;
+      font-size: 24px; cursor: pointer; backdrop-filter: blur(5px); z-index: 1000; display: none;
+    }
+    .xr-active .exit-ar { display: flex; }
+    .webxr-hidden { display: none !important; }
+  </style>
+  <script type="importmap">
+    {
+      "imports": {
+        "three": "https://cdn.jsdelivr.net/npm/three@0.150.1/build/three.module.js",
+        "GLTFLoader": "https://cdn.jsdelivr.net/npm/three@0.150.1/examples/jsm/loaders/GLTFLoader.js"
+      }
+    }
+  </script>
+</head>
+<body>
+  
+  <div id="overlay">
+    <!-- SVG Defs -->
+    <svg width="0" height="0" style="position:absolute;">
+      <defs>
+        <g id="icon-play">
+          <path d="M8 5v14l11-7z" stroke-linejoin="round" stroke-linecap="round"/>
+        </g>
+      </defs>
+    </svg>
+
+    <!-- Launch Button -->
+    <button class="xr-btn" id="launch-button" aria-label="Start XR Experience" disabled>
+      <svg class="play-svg" viewBox="0 0 24 24">
+        <use href="#icon-play"></use>
+      </svg>
+    </button>
+  </div>
+  
+  <!-- Toast Notification for pitch feedback -->
+  <div id="toast">XR Experience Launched!</div>
+
+  <button class="exit-ar" id="exit-ar">×</button>
+  <audio id="death-sound" preload="auto" src="dead.mp3"></audio>
+  <audio id="glass-break-sound" preload="auto" src="minecraft-glass-break.mp3"></audio>
+  <audio id="score1-sound" preload="auto" src="score1.mp3"></audio>
+  <audio id="score2-sound" preload="auto" src="score2.mp3"></audio>
+  <audio id="score3-sound" preload="auto" src="score3.mp3"></audio>
+
+  <script type="module">
+    import * as THREE from 'three';
+    import { GLTFLoader } from 'GLTFLoader';
+
+    // --- GAME STATE ---
+    const state = {
+      xrSession: null, isPlaying: false, isControllerSelection: false, isFirstRun: true,
+      lives: 3, score: 0, highScore: parseInt(localStorage.getItem('crystalRunnerHighScore') || '0', 10),
+      speed: 2.0, baseSpeed: 2.0, spawnInterval: 2.0, lastSpawn: 0,
+      lane: 1, clock: new THREE.Clock(), gameStartTime: 0,
+      selectedCtrlIdx: 0, ctrlHoldStart: {}, activeController: null
+    };
+
+    // NXT/Care v1.3 standard timings
+    const CONSTANTS = {
+      lanes: [-0.4, 0, 0.4],
+      colors: [0x84f7fd, 0x64acff, 0xa864ff, 0x45caff],
+      selectTime: 4000,
+      holdTime: 3000,
+      clapDist: 0.15,
+      clapTime: 6000,
+      learnTime: 10, restartTime: 2, maxObstacles: 8,
+      midFadeStart: -3.0,
+      midFadeEnd:   -1.8
+    };
+
+    // --- GLOBALS ---
+    let camera, scene, renderer, gltfLoader, backgroundMusic;
+    let player, ground, scorePanel, highScoreText, crystalsText, livesText;
+    let controllers = [], obstacles = [], pool = [], envObjects = [];
+    let particles = [], particlePool = [];
+    let gemDataList = [];
+    let lastRot = new THREE.Euler(), clapStart = 0;
+    const _euler = new THREE.Euler();
+    let bombTemplateGroup;
+    let clapHUD = null;
+    
+    // UI State
+    let isLaunching = false;
+    let toastTimeout;
+
+    // ---------- helpers ----------
+    function makeUITexture(canvas) {
+      const t = new THREE.CanvasTexture(canvas);
+      t.encoding = THREE.sRGBEncoding;
+      t.anisotropy = 4;
+      t.minFilter = THREE.LinearFilter;
+      t.magFilter = THREE.LinearFilter;
+      t.generateMipmaps = false;
+      return t;
+    }
+    function makeUIMaterial(map, extra = {}) {
+      return new THREE.MeshBasicMaterial({ map, transparent: true, toneMapped: false, ...extra });
+    }
+
+    function setGroupOpacity(group, opacity) {
+      group.traverse(child => {
+        if (child.isMesh && child.material) child.material.opacity = opacity;
+      });
+    }
+
+    function makeLaneGradientTexture() {
+      const c = document.createElement('canvas');
+      c.width = 256; c.height = 4;
+      const ctx = c.getContext('2d');
+      const g = ctx.createLinearGradient(0, 0, 256, 0);
+      g.addColorStop(0.00, '#b48fff');   // soft lavender
+      g.addColorStop(0.20, '#93c5ff');   // cornflower blue
+      g.addColorStop(0.50, '#c8eeff');   // bright sky-blue centre
+      g.addColorStop(0.80, '#93c5ff');
+      g.addColorStop(1.00, '#b48fff');
+      ctx.fillStyle = g;
+      ctx.fillRect(0, 0, 256, 4);
+      const t = new THREE.CanvasTexture(c);
+      t.encoding = THREE.sRGBEncoding;
+      t.minFilter = THREE.LinearFilter;
+      t.magFilter = THREE.LinearFilter;
+      t.generateMipmaps = false;
+      return t;
+    }
+
+    init();
+    function init() {
+      scene = new THREE.Scene();
+      scene.fog = new THREE.FogExp2(0xddeeff, 0.05);
+      camera = new THREE.PerspectiveCamera(70, window.innerWidth/window.innerHeight, 0.01, 20);
+      renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true, powerPreference: "high-performance" });
+      renderer.setSize(window.innerWidth, window.innerHeight);
+      renderer.xr.enabled = true;
+      renderer.setClearColor(0x000000, 0);
+      renderer.outputEncoding = THREE.sRGBEncoding;
+      renderer.toneMapping = THREE.ACESFilmicToneMapping;
+      renderer.toneMappingExposure = 1.0;
+      document.body.appendChild(renderer.domElement);
+
+      scene.add(new THREE.AmbientLight(0xffffff, 0.55));
+      const hemiLight = new THREE.HemisphereLight(0xffddff, 0x88ccff, 0.40);
+      hemiLight.position.set(0, 5, 0); scene.add(hemiLight);
+      const dirLight = new THREE.DirectionalLight(0xffeedd, 0.85);
+      dirLight.position.set(1, 4, 2); scene.add(dirLight);
+      const rimLight = new THREE.DirectionalLight(0x88aaff, 0.30);
+      rimLight.position.set(-2, 1, -1); scene.add(rimLight);
+
+      createBombTemplate();
+
+      const pGeo = new THREE.SphereGeometry(1, 8, 8);
+      const pMat = new THREE.MeshBasicMaterial({ transparent: true, opacity: 0.7, color: 0xffffff, toneMapped: false });
+      for (let i = 0; i < 250; i++) {
+        const m = new THREE.Mesh(pGeo, pMat.clone());
+        m.visible = false; scene.add(m);
+        particlePool.push({ mesh: m, active: false, life: 0, vel: new THREE.Vector3() });
+      }
+
+      gltfLoader = new GLTFLoader();
+      loadGemModels().then(() => {
+        // Activate the new launcher button when models are loaded
+        const launchBtn = document.getElementById('launch-button');
+        launchBtn.disabled = false;
+        
+        launchBtn.addEventListener('click', () => {
+          if (isLaunching) return;
+          isLaunching = true;
+          
+          // Visual feedback
+          const toast = document.getElementById('toast');
+          toast.classList.add('show');
+          
+          clearTimeout(toastTimeout);
+          toastTimeout = setTimeout(() => {
+            toast.classList.remove('show');
+            isLaunching = false;
+          }, 2000);
+
+          // Initiate the actual XR session
+          startAR();
+        });
+      });
+
+      backgroundMusic = new Audio('Gentlelane.mp3');
+      backgroundMusic.loop = true; backgroundMusic.volume = 0.7;
+      document.getElementById('exit-ar').addEventListener('click', endAR);
+      window.addEventListener('resize', () => {
+        camera.aspect = window.innerWidth / window.innerHeight;
+        camera.updateProjectionMatrix();
+        renderer.setSize(window.innerWidth, window.innerHeight);
+      });
+    }
+
+    // --- BOMB CREATION ---
+    function createBombTemplate() {
+      bombTemplateGroup = new THREE.Group();
+      const bodyGeo = new THREE.SphereGeometry(0.1, 32, 32);
+      const bodyMat = new THREE.MeshStandardMaterial({ color: 0x111111, roughness: 0.4, metalness: 0.2 });
+      bombTemplateGroup.add(new THREE.Mesh(bodyGeo, bodyMat));
+
+      const cvs = document.createElement('canvas');
+      cvs.width = 256; cvs.height = 256;
+      const ctx = cvs.getContext('2d');
+      ctx.strokeStyle = 'white'; ctx.lineWidth = 26; ctx.lineCap = 'round';
+      ctx.beginPath(); ctx.moveTo(40, 40); ctx.lineTo(216, 216); ctx.stroke();
+      ctx.beginPath(); ctx.moveTo(216, 40); ctx.lineTo(40, 216); ctx.stroke();
+      ctx.fillStyle = 'white';
+      ctx.beginPath(); ctx.arc(128, 90, 55, 0, Math.PI * 2); ctx.fill();
+      ctx.fillRect(96, 110, 64, 50);
+      ctx.fillStyle = '#111111';
+      ctx.beginPath(); ctx.arc(104, 100, 16, 0, Math.PI * 2); ctx.fill();
+      ctx.beginPath(); ctx.arc(152, 100, 16, 0, Math.PI * 2); ctx.fill();
+      ctx.beginPath(); ctx.moveTo(128, 120); ctx.lineTo(116, 136); ctx.lineTo(140, 136); ctx.fill();
+      ctx.strokeStyle = '#111111'; ctx.lineWidth = 6;
+      ctx.beginPath(); ctx.moveTo(112, 140); ctx.lineTo(112, 160); ctx.stroke();
+      ctx.beginPath(); ctx.moveTo(128, 140); ctx.lineTo(128, 160); ctx.stroke();
+      ctx.beginPath(); ctx.moveTo(144, 140); ctx.lineTo(144, 160); ctx.stroke();
+
+      const tex = makeUITexture(cvs);
+      const decal = new THREE.Mesh(
+        new THREE.PlaneGeometry(0.13, 0.13),
+        makeUIMaterial(tex, { alphaTest: 0.1 })
+      );
+      decal.position.set(0, 0, 0.098);
+      bombTemplateGroup.add(decal);
+
+      const base = new THREE.Mesh(
+        new THREE.CylinderGeometry(0.02, 0.02, 0.02, 8),
+        new THREE.MeshStandardMaterial({ color: 0x444444 })
+      );
+      base.position.set(0, 0.1, 0);
+      bombTemplateGroup.add(base);
+
+      const wire = new THREE.Mesh(
+        new THREE.CylinderGeometry(0.005, 0.005, 0.06, 8),
+        new THREE.MeshStandardMaterial({ color: 0x8b5a2b })
+      );
+      wire.position.set(0.02, 0.12, 0);
+      wire.rotation.z = -Math.PI / 4;
+      bombTemplateGroup.add(wire);
+
+      const spark = new THREE.Mesh(
+        new THREE.SphereGeometry(0.015, 8, 8),
+        new THREE.MeshBasicMaterial({ color: 0xffaa00, toneMapped: false })
+      );
+      spark.position.set(0.04, 0.14, 0);
+      spark.name = "spark";
+      bombTemplateGroup.add(spark);
+      bombTemplateGroup.scale.setScalar(0.9);
+    }
+
+    async function loadGemModels() {
+      const gems = [
+        { file: 'gem1.glb', scale: 0.144 },
+        { file: 'gem2.glb', scale: 0.0300 },
+        { file: 'gem5.glb', scale: 0.00900 }
+      ];
+      const promises = gems.map(g => {
+        return new Promise((res, rej) => gltfLoader.load(g.file, res, undefined, rej))
+          .then(gltf => {
+            gltf.scene.traverse(child => {
+              if (child.isMesh && !gemDataList.find(d => d.scale === g.scale)) {
+                const niceMat = new THREE.MeshStandardMaterial({
+                  color: child.material.color || new THREE.Color(0xffffff),
+                  map: child.material.map,
+                  metalness: 0.8, roughness: 0.25,
+                  emissive: child.material.color || new THREE.Color(0x3a70ff),
+                  emissiveIntensity: 0.25
+                });
+                gemDataList.push({ geometry: child.geometry, material: niceMat, scale: g.scale });
+              }
+            });
+          })
+          .catch(e => console.warn(`Skipping ${g.file}:`, e));
+      });
+      await Promise.all(promises);
+    }
+
+    // --- XR SESSION ---
+    async function startAR() {
+      if (!navigator.xr) return;
+      try {
+        const session = await navigator.xr.requestSession('immersive-ar', {
+          requiredFeatures: ['hit-test'], optionalFeatures: ['dom-overlay'], domOverlay: { root: document.body }
+        });
+        document.getElementById('overlay').classList.add('webxr-hidden');
+        document.body.classList.add('xr-active');
+        renderer.xr.setReferenceSpaceType('local');
+        renderer.xr.setSession(session);
+        state.xrSession = session;
+        buildWorld();
+        buildClapHUD();
+        setupControllers(session);
+        preloadObstacles();
+        renderer.compile(scene, camera);
+        state.isControllerSelection = true;
+        state.gameStartTime = state.clock.getElapsedTime();
+        renderer.setAnimationLoop(render);
+        session.addEventListener('end', endAR);
+      } catch (e) { console.error("XR Error:", e); }
+    }
+    function endAR() {
+      if (state.xrSession) state.xrSession.end();
+      state.isPlaying = state.isControllerSelection = false;
+      document.body.classList.remove('xr-active');
+      document.getElementById('overlay').classList.remove('webxr-hidden');
+      backgroundMusic.pause(); backgroundMusic.currentTime = 0;
+      clearScene();
+      renderer.setAnimationLoop(null);
+      state.xrSession = null;
+    }
+
+    // --- WORLD BUILDING ---
+    function buildWorld() {
+      const laneTex = makeLaneGradientTexture();
+      ground = new THREE.Mesh(
+        new THREE.BoxGeometry(2.4, 0.02, 19),
+        new THREE.MeshStandardMaterial({
+          map: laneTex,
+          color: 0xccddff,
+          metalness: 0.5, roughness: 0.3,
+          transparent: true, opacity: 0.65,
+          emissive: 0x221144, emissiveIntensity: 0.28
+        })
+      );
+      ground.position.set(0, -0.52, -9);
+      scene.add(ground); envObjects.push(ground);
+
+      const dividers = [-0.6, -0.2, 0.2, 0.6];
+      for (let i = 0; i < 4; i++) {
+        const lm = new THREE.Mesh(
+          new THREE.PlaneGeometry(0.04, 19),
+          new THREE.MeshBasicMaterial({ color: 0xffffff, transparent: true, opacity: 0.85, toneMapped: false })
+        );
+        lm.rotation.x = -Math.PI / 2;
+        lm.position.set(dividers[i], -0.505, -9);
+        scene.add(lm); envObjects.push(lm);
+      }
+
+      const envGeom = new THREE.IcosahedronGeometry(1, 0);
+      const envMat = new THREE.MeshStandardMaterial({
+        color: 0xffffff, metalness: 0.8, roughness: 0.15, emissive: 0xffffff, emissiveIntensity: 0.10
+      });
+      const envInstanced = new THREE.InstancedMesh(envGeom, envMat, 40);
+      const dummy = new THREE.Object3D();
+      const colorObj = new THREE.Color();
+      for (let i = 0; i < 40; i++) {
+        const size = 0.03 + Math.random() * 0.06;
+        const side = Math.random() > 0.5 ? 1 : -1;
+        dummy.position.set(side * 0.8 + (Math.random() * 0.3 * side), -0.50 + size / 2, -2 - i * 0.4);
+        dummy.scale.setScalar(size);
+        dummy.rotation.set(Math.random()*Math.PI, Math.random()*Math.PI, 0);
+        dummy.updateMatrix();
+        envInstanced.setMatrixAt(i, dummy.matrix);
+        colorObj.setHex(CONSTANTS.colors[Math.floor(Math.random() * CONSTANTS.colors.length)]);
+        envInstanced.setColorAt(i, colorObj);
+      }
+      envInstanced.instanceMatrix.needsUpdate = true;
+      envInstanced.instanceColor.needsUpdate = true;
+      scene.add(envInstanced);
+      envObjects.push(envInstanced);
+
+      player = new THREE.Group();
+      const bubbleMat = new THREE.MeshPhysicalMaterial({
+        color: 0xffffff, emissive: 0xffbbee, emissiveIntensity: 0.15,
+        transmission: 0.95, opacity: 1, metalness: 0.1, roughness: 0.05, ior: 1.1,
+        side: THREE.DoubleSide
+      });
+      player.add(new THREE.Mesh(new THREE.SphereGeometry(0.12, 32, 32), bubbleMat));
+      const hl = new THREE.Mesh(
+        new THREE.SphereGeometry(0.04, 8, 8),
+        new THREE.MeshBasicMaterial({ color: 0xffe6f2, transparent: true, opacity: 0.6, toneMapped: false })
+      );
+      hl.position.set(-0.05, 0.05, 0.08); player.add(hl);
+      player.position.set(CONSTANTS.lanes[1], -0.22, -2);
+      scene.add(player);
+
+      buildUI();
+
+      for (let i = 0; i < 50; i++) {
+        const p = new THREE.Mesh(
+          new THREE.SphereGeometry(0.01 + Math.random()*0.02, 8, 8),
+          new THREE.MeshBasicMaterial({ color: CONSTANTS.colors[i % 4], transparent: true, opacity: 0.6, toneMapped: false })
+        );
+        p.position.set((Math.random()-0.5)*3, Math.random()*1, -Math.random()*15);
+        scene.add(p); particles.push(p);
+      }
+    }
+
+    // --- UI SYSTEM ---
+    function createTextTex(text, color) {
+      const cvs = document.createElement('canvas'); cvs.width = 512; cvs.height = 128;
+      const ctx = cvs.getContext('2d');
+      ctx.fillStyle = 'rgba(0,0,0,0.8)'; ctx.fillRect(0,0,cvs.width,cvs.height);
+      ctx.strokeStyle = 'rgba(255,255,255,0.3)'; ctx.lineWidth = 2; ctx.strokeRect(2,2,cvs.width-4,cvs.height-4);
+      ctx.fillStyle = color; ctx.font = 'bold 42px Arial'; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+      ctx.fillText(text, cvs.width/2, cvs.height/2);
+      return makeUITexture(cvs);
+    }
+    function buildUI() {
+      scorePanel = new THREE.Group();
+      scorePanel.position.set(1.0, 0.3, -1.5);
+      scorePanel.rotation.y = -0.35;
+      highScoreText = new THREE.Mesh(new THREE.PlaneGeometry(1.2, 0.3), makeUIMaterial(createTextTex(`🏆 ${state.highScore}`, '#ffdd00')));
+      highScoreText.position.y = 0.6; scorePanel.add(highScoreText);
+      crystalsText = new THREE.Mesh(new THREE.PlaneGeometry(1.2, 0.3), makeUIMaterial(createTextTex('💎 0', '#ffdd00')));
+      crystalsText.position.y = 0.2; scorePanel.add(crystalsText);
+      livesText = new THREE.Mesh(new THREE.PlaneGeometry(1.2, 0.3), makeUIMaterial(createTextTex('❤❤❤', '#ff4444')));
+      livesText.position.y = -0.2; scorePanel.add(livesText);
+      scene.add(scorePanel);
+    }
+    function updateUI() {
+      const swap = (mesh, tex) => {
+        if (mesh.material.map) mesh.material.map.dispose();
+        mesh.material.map = tex;
+        mesh.material.needsUpdate = true;
+      };
+      swap(highScoreText, createTextTex(`🏆 ${state.highScore}`, '#ffbb00'));
+      swap(crystalsText, createTextTex(`💎 ${state.score}`, '#ffdd00'));
+      swap(livesText, createTextTex('❤'.repeat(Math.max(0, state.lives)) + '🖤'.repeat(Math.max(0, 3 - state.lives)), '#ff4444'));
+    }
+
+    // --- NXT/Care v1.3 CLAP HUD ---
+    function roundRect(ctx, x, y, w, h, r) {
+      ctx.beginPath();
+      ctx.moveTo(x + r, y);
+      ctx.arcTo(x + w, y, x + w, y + h, r);
+      ctx.arcTo(x + w, y + h, x, y + h, r);
+      ctx.arcTo(x, y + h, x, y, r);
+      ctx.arcTo(x, y, x + w, y, r);
+      ctx.closePath();
+    }
+    function buildClapHUD() {
+      clapHUD = new THREE.Group();
+      const c = document.createElement('canvas');
+      c.width = 1024; c.height = 220;
+      const tex = makeUITexture(c);
+      const mesh = new THREE.Mesh(
+        new THREE.PlaneGeometry(0.7, 0.15),
+        makeUIMaterial(tex, { depthTest: false })
+      );
+      mesh.renderOrder = 999;
+      clapHUD.add(mesh);
+      clapHUD.userData = { canvas: c, ctx: c.getContext('2d'), tex };
+      clapHUD.visible = false;
+      scene.add(clapHUD);
+    }
+    function drawClapHUD() {
+      if (!clapHUD) return;
+      clapHUD.visible = clapStart > 0;
+      if (!clapHUD.visible) return;
+      const xrCam = renderer.xr.getCamera();
+      clapHUD.position.copy(xrCam.position);
+      clapHUD.quaternion.copy(xrCam.quaternion);
+      clapHUD.translateZ(-0.9);
+      clapHUD.translateY(0.15);
+
+      const { canvas, ctx, tex } = clapHUD.userData;
+      const W = 1024, H = 220, R = 110;
+      ctx.clearRect(0, 0, W, H);
+      ctx.shadowColor = 'rgba(14,165,233,0.22)';
+      ctx.shadowBlur = 28;
+      ctx.shadowOffsetY = 10;
+      ctx.fillStyle = 'rgba(255,255,255,0.92)';
+      roundRect(ctx, 12, 8, W - 24, H - 24, R); ctx.fill();
+      ctx.shadowColor = 'transparent'; ctx.shadowBlur = 0; ctx.shadowOffsetY = 0;
+      ctx.strokeStyle = 'rgba(255,255,255,0.9)'; ctx.lineWidth = 2;
+      roundRect(ctx, 13, 9, W - 26, H - 26, R - 1); ctx.stroke();
+
+      const elapsed = Date.now() - clapStart;
+      const prog = Math.min(1, elapsed / CONSTANTS.clapTime);
+      const remain = Math.max(0, Math.ceil((CONSTANTS.clapTime - elapsed) / 1000));
+
+      ctx.fillStyle = '#0f172a';
+      ctx.font = '800 52px -apple-system, "SF Pro Rounded", "Segoe UI", Helvetica, sans-serif';
+      ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+      ctx.fillText(`👏 Hold sammen i ${remain}s for at lukke`, W / 2, 78);
+
+      const bx = 64, by = 142, bw = W - 128, bh = 36, br = 18;
+      ctx.fillStyle = 'rgba(14,165,233,0.12)';
+      roundRect(ctx, bx, by, bw, bh, br); ctx.fill();
+      if (prog > 0) {
+        const grad = ctx.createLinearGradient(bx, 0, bx + bw, 0);
+        grad.addColorStop(0, '#bae6fd'); grad.addColorStop(1, '#0ea5e9');
+        ctx.fillStyle = grad;
+        roundRect(ctx, bx, by, Math.max(br * 2, Math.round(bw * prog)), bh, br); ctx.fill();
+      }
+      tex.needsUpdate = true;
+    }
+
+    // --- CONTROLLERS & INPUT ---
+    function setupControllers(session) {
+      controllers = [renderer.xr.getController(0), renderer.xr.getController(1)];
+      controllers.forEach((c, i) => {
+        scene.add(c);
+        c.addEventListener('selectstart', () => { state.ctrlPressStart = Date.now(); });
+        c.addEventListener('selectend', () => {
+          if (Date.now() - state.ctrlPressStart >= 3000) {
+            state.selectedCtrlIdx = state.selectedCtrlIdx === 0 ? 1 : 0;
+            state.activeController = controllers[state.selectedCtrlIdx];
+            triggerConfetti(state.activeController);
+          }
+        });
+      });
+    }
+    function processControllerSelection() {
+      if (!state.isControllerSelection) return;
+      const elapsed = (state.clock.getElapsedTime() - state.gameStartTime) * 1000;
+      let highestY = -999, highestIdx = -1;
+      controllers.forEach((c, i) => { if (c.visible && c.position.y > highestY) { highestY = c.position.y; highestIdx = i; } });
+      if (highestIdx >= 0) {
+        const c = controllers[highestIdx];
+        const isInFront = c.position.z > -0.8 && c.position.z < -0.3 && Math.abs(c.position.x) < 0.3;
+        if (isInFront) {
+          if (!state.ctrlHoldStart[highestIdx]) state.ctrlHoldStart[highestIdx] = state.clock.getElapsedTime();
+          if ((state.clock.getElapsedTime() - state.ctrlHoldStart[highestIdx]) * 1000 >= CONSTANTS.holdTime) {
+            confirmController(highestIdx); return;
+          }
+        } else state.ctrlHoldStart[highestIdx] = null;
+      }
+      if (elapsed > CONSTANTS.selectTime) confirmController(Math.max(0, highestIdx));
+    }
+    function confirmController(idx) {
+      state.isControllerSelection = false;
+      state.selectedCtrlIdx = idx;
+      state.activeController = controllers[idx];
+      triggerConfetti(state.activeController);
+      document.getElementById('death-sound').play().catch(() => {});
+      backgroundMusic.play().catch(() => {});
+      state.isPlaying = true;
+      state.gameStartTime = state.clock.getElapsedTime();
+    }
+    function checkClap() {
+      if (controllers.length < 2 || !controllers[0].visible || !controllers[1].visible) {
+        clapStart = 0; return;
+      }
+      const c1 = controllers[0], c2 = controllers[1];
+      if (c1.position.lengthSq() === 0 && c2.position.lengthSq() === 0) {
+        clapStart = 0; return;
+      }
+      if (c1.position.distanceTo(c2.position) <= CONSTANTS.clapDist) {
+        if (!clapStart) clapStart = Date.now();
+        else if (Date.now() - clapStart >= CONSTANTS.clapTime) {
+          clapStart = 0; endAR();
+        }
+      } else clapStart = 0;
+    }
+    function handleSteering() {
+      if (!state.activeController || !state.isPlaying) return;
+      _euler.setFromQuaternion(state.activeController.quaternion);
+
+      const HALF_W = 0.4;
+      const GAIN   = 0.5;
+      const dz = _euler.z - lastRot.z;
+      player.position.x = Math.max(-HALF_W, Math.min(HALF_W, player.position.x + dz * GAIN));
+
+      state.lane = player.position.x < -0.13 ? 0 : player.position.x > 0.13 ? 2 : 1;
+
+      const tx = CONSTANTS.lanes[state.lane];
+      player.position.y = -0.22 + Math.sin(state.clock.getElapsedTime() * 2) * 0.03;
+      player.rotation.y += (tx - player.position.x) * 0.1;
+      player.rotation.z = (tx - player.position.x) * 0.3;
+
+      lastRot.copy(_euler);
+    }
+
+    // --- OBSTACLES & POOLING ---
+    function preloadObstacles() {
+      for (let i = 0; i < 30; i++) pool.push(createObstacleGroup(true));
+    }
+    function createObstacleGroup(isHidden) {
+      const rootGrp = new THREE.Group();
+      const gemMesh = new THREE.Mesh();
+      rootGrp.add(gemMesh);
+
+      const bombGrp = bombTemplateGroup.clone();
+      bombGrp.traverse(child => {
+        if (child.isMesh && child.material) {
+          child.material = child.material.clone();
+          child.material.transparent = true;
+        }
+      });
+      rootGrp.add(bombGrp);
+
+      const ownGemMats = gemDataList.map(g => {
+        const m = g.material.clone();
+        m.transparent = true;
+        return m;
+      });
+
+      rootGrp.position.set(0, isHidden ? -100 : -15, isHidden ? -100 : -15);
+      rootGrp.visible = !isHidden;
+      scene.add(rootGrp);
+      return {
+        group: rootGrp, gemMesh, bombGroup: bombGrp,
+        sparkMesh: bombGrp.getObjectByName("spark"),
+        inUse: !isHidden, type: 'crystal',
+        _faded: false,
+        ownGemMats
+      };
+    }
+    function spawnObstacle() {
+      if (obstacles.length >= CONSTANTS.maxObstacles) return;
+      let obs = pool.find(o => !o.inUse);
+      if (!obs) { obs = createObstacleGroup(false); pool.push(obs); }
+      const gameTime = state.clock.getElapsedTime() - state.gameStartTime;
+      const badChance = Math.min(0.40, gameTime / 150.0);
+      const isBad = Math.random() < badChance;
+      obs.type = isBad ? 'bad' : 'crystal';
+
+      obs._faded = false;
+      setGroupOpacity(obs.group, 1.0);
+
+      if (isBad) {
+        obs.bombGroup.visible = true;
+        obs.gemMesh.visible = false;
+        obs.bombGroup.rotation.set(0, 0, 0);
+      } else {
+        obs.bombGroup.visible = false;
+        obs.gemMesh.visible = true;
+        if (gemDataList.length > 0) {
+          const idx = Math.floor(Math.random() * gemDataList.length);
+          const gem = gemDataList[idx];
+          obs.gemMesh.geometry = gem.geometry;
+          obs.gemMesh.material = obs.ownGemMats[idx];
+          obs.gemMesh.scale.setScalar(gem.scale);
+        }
+        obs.gemMesh.rotation.set(Math.random()*Math.PI, Math.random()*Math.PI, 0);
+      }
+      obs.inUse = true;
+      obs.group.position.set(CONSTANTS.lanes[Math.floor(Math.random()*3)], -0.22, -15);
+      obs.group.visible = true;
+      obstacles.push(obs);
+    }
+
+    // --- EFFECTS ---
+    function spawnParticle(pos, vel, life, scale, colorHSL) {
+      const p = particlePool.find(x => !x.active);
+      if (!p) return;
+      p.active = true; p.life = life; p.vel.copy(vel);
+      p.mesh.position.copy(pos); p.mesh.scale.setScalar(scale);
+      p.mesh.material.color.setHSL(colorHSL.h, colorHSL.s, colorHSL.l);
+      p.mesh.material.opacity = 0.85; p.mesh.visible = true;
+    }
+    function triggerConfetti(ctrl) {
+      const pos = new THREE.Vector3(); ctrl.getWorldPosition(pos);
+      for (let i = 0; i < 40; i++) {
+        spawnParticle(pos,
+          new THREE.Vector3((Math.random()-.5)*.25, Math.random()*.3+.05, (Math.random()-.5)*.25),
+          1.2+Math.random()*.6, 0.01 + Math.random()*0.025,
+          { h: Math.random(), s: 0.8, l: 0.7 });
+      }
+    }
+    function createTrail(pos, count) {
+      for (let i = 0; i < count; i++) {
+        spawnParticle(
+          new THREE.Vector3().copy(pos).add(new THREE.Vector3((Math.random()-.5)*.1, (Math.random()-.5)*.1, (Math.random()-.5)*.1)),
+          new THREE.Vector3((Math.random()-.5)*.03, Math.random()*.03, (Math.random()-.5)*.03),
+          0.7+Math.random()*.3, 0.01 + Math.random()*0.02,
+          { h: Math.random(), s: 0.8, l: 0.7 });
+      }
+    }
+    function triggerSmoke(pos) {
+      for (let i = 0; i < 20; i++) {
+        spawnParticle(
+          new THREE.Vector3().copy(pos).add(new THREE.Vector3((Math.random()-.5)*.2, (Math.random()-.5)*.2, (Math.random()-.5)*.2)),
+          new THREE.Vector3((Math.random()-.5)*.05, 0.02 + Math.random()*.05, (Math.random()-.5)*.05),
+          1.0 + Math.random() * 1.0, 0.03 + Math.random() * 0.05,
+          { h: 0, s: 0, l: 0.2 + Math.random() * 0.3 });
+      }
+    }
+
+    // --- GAME LOOP ---
+    function checkCollisions() {
+      for (let i = obstacles.length-1; i >= 0; i--) {
+        const o = obstacles[i];
+        if (o.group.visible && player.position.distanceTo(o.group.position) < 0.25) {
+          if (o.type === 'bad') {
+            state.lives--; updateUI();
+            document.getElementById('glass-break-sound').play().catch(() => {});
+            createTrail(player.position, 20);
+            triggerSmoke(player.position);
+            state.speed = state.baseSpeed;
+            player.children[0].material.color.set(state.lives <= 0 ? 0x666666 : 0xff6666);
+            if (state.lives <= 0) {
+              state.isPlaying = false;
+              setTimeout(() => {
+                state.lives = 3; state.score = 0; state.speed = state.baseSpeed;
+                state.isFirstRun = false; state.gameStartTime = state.clock.getElapsedTime();
+                obstacles.forEach(ob => { ob.inUse = false; ob.group.visible = false; });
+                obstacles = []; updateUI(); player.children[0].material.color.set(0xffffff);
+                state.isPlaying = true;
+              }, 4000);
+            } else {
+              setTimeout(() => player.children[0].material.color.set(0xffffff), 1500);
+            }
+          } else {
+            state.score++;
+            if (state.score > state.highScore) {
+              state.highScore = state.score;
+              localStorage.setItem('crystalRunnerHighScore', state.highScore.toString());
+            }
+            updateUI();
+            createTrail(player.position, 8);
+            player.scale.setScalar(1.2);
+            setTimeout(() => player.scale.setScalar(1.0), 150);
+            const gemSounds = [document.getElementById('score1-sound'), document.getElementById('score2-sound'), document.getElementById('score3-sound')];
+            const randSound = gemSounds[Math.floor(Math.random() * gemSounds.length)];
+            randSound.currentTime = 0;
+            randSound.play().catch(() => {});
+          }
+          setGroupOpacity(o.group, 1.0);
+          o._faded = false;
+          o.inUse = false; o.group.visible = false;
+          obstacles.splice(i, 1);
+        }
+      }
+    }
+
+    function render(time, frame) {
+      const dt = Math.min(state.clock.getDelta(), 1/30);
+      if (!frame) return;
+      if (state.isControllerSelection) processControllerSelection();
+      else checkClap();
+      drawClapHUD();
+
+      if (state.isPlaying && !state.isControllerSelection) {
+        handleSteering();
+        const gameTime = state.clock.getElapsedTime() - state.gameStartTime;
+        const learnTime = state.isFirstRun ? CONSTANTS.learnTime : CONSTANTS.restartTime;
+        const canSpawn = gameTime > learnTime;
+
+        for (let i = obstacles.length-1; i >= 0; i--) {
+          const o = obstacles[i];
+          const root = o.group;
+          root.position.z += state.speed * dt;
+
+          const isMidLane = Math.abs(root.position.x) < 0.15;
+          if (isMidLane) {
+            const t = (root.position.z - CONSTANTS.midFadeStart) /
+                      (CONSTANTS.midFadeEnd - CONSTANTS.midFadeStart);
+            const opacity = Math.max(0, Math.min(1, 1 - t));
+            if (opacity < 1.0 || o._faded) {
+              setGroupOpacity(root, opacity);
+              o._faded = opacity < 1.0;
+            }
+          } else if (o._faded) {
+            setGroupOpacity(root, 1.0);
+            o._faded = false;
+          }
+
+          if (o.type === 'crystal') {
+            o.gemMesh.rotation.x += dt * .5;
+            o.gemMesh.rotation.y += dt * .8;
+          } else {
+            o.bombGroup.rotation.z = Math.sin(time * 0.005) * 0.1;
+            o.bombGroup.position.y = Math.sin(time * 0.008) * 0.02;
+            if (o.sparkMesh) o.sparkMesh.scale.setScalar(1 + Math.random() * 0.6);
+          }
+
+          if (root.position.z > 1) {
+            setGroupOpacity(root, 1.0);
+            o._faded = false;
+            o.inUse = false; root.visible = false;
+            obstacles.splice(i, 1);
+            if (canSpawn && state.lives > 0) state.speed += 0.01;
+          }
+        }
+
+        if (canSpawn && state.lives > 0 && state.clock.getElapsedTime() - state.lastSpawn > state.spawnInterval) {
+          spawnObstacle();
+          state.lastSpawn = state.clock.getElapsedTime();
+          state.spawnInterval = Math.max(0.8, state.spawnInterval - 0.02);
+        }
+        if (state.lives > 0) checkCollisions();
+      }
+
+      particles.forEach(p => {
+        p.position.y -= dt * 0.3;
+        if (p.position.y < -1) p.position.set((Math.random()-.5)*3, 1, -Math.random()*15);
+      });
+      for (let i = 0; i < particlePool.length; i++) {
+        const p = particlePool[i];
+        if (p.active) {
+          p.mesh.position.add(p.vel); p.life -= dt;
+          p.mesh.material.opacity = Math.max(0, p.life * 0.7);
+          if (p.life <= 0) { p.active = false; p.mesh.visible = false; }
+        }
+      }
+      renderer.render(scene, camera);
+    }
+
+    function clearScene() {
+      [player, ground, scorePanel, clapHUD].forEach(o => { if (o) scene.remove(o); });
+      clapHUD = null;
+      [...obstacles, ...pool].forEach(o => scene.remove(o.group)); pool = []; obstacles = [];
+      envObjects.forEach(o => {
+        if (o.isInstancedMesh) { o.geometry.dispose(); o.material.dispose(); }
+        scene.remove(o);
+      });
+      envObjects = [];
+      particles.forEach(p => { scene.remove(p); p.geometry.dispose(); p.material.dispose(); });
+      particles = [];
+      particlePool.forEach(p => { p.active = false; p.mesh.visible = false; });
+      clapStart = 0;
+    }
+  </script>
+</body>
+</html>
