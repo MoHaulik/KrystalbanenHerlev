@@ -170,7 +170,17 @@
       lives: 3, score: 0, highScore: parseInt(localStorage.getItem('crystalRunnerHighScore') || '0', 10),
       speed: 2.0, baseSpeed: 2.0, spawnInterval: 2.0, lastSpawn: 0,
       lane: 1, clock: new THREE.Clock(), gameStartTime: 0,
-      selectedCtrlIdx: 0, ctrlHoldStart: {}, activeController: null
+      selectedCtrlIdx: 0, ctrlHoldStart: {}, activeController: null,
+      // BUGFIX: activeController/selectedCtrlIdx used to be the only record of
+      // "which hand is playing" -- a Three.js controller SLOT index (0/1), not
+      // the physical hand itself. Three.js reassigns which slot a given
+      // physical hand occupies whenever that inputSource reconnects (hand
+      // tracking briefly losing/regaining lock is common and totally normal
+      // mid-session), which silently swapped who was steering with zero user
+      // action. activeHandedness ('left'/'right') is the real ground truth now;
+      // activeController is re-resolved from it every frame instead of being
+      // trusted as a stored reference. See resolveActiveController().
+      activeHandedness: null
     };
 
     // NXT/Care v1.3 standard timings
@@ -610,15 +620,35 @@
       controllers = [renderer.xr.getController(0), renderer.xr.getController(1)];
       controllers.forEach((c, i) => {
         scene.add(c);
+        // Slot-to-physical-hand is NOT stable (see activeHandedness comment
+        // above) -- 'connected' fires every time this slot's inputSource
+        // changes, including a hand re-acquiring tracking, so userData.handedness
+        // always reflects who is CURRENTLY in this slot, not who was there when
+        // the game started.
+        c.addEventListener('connected', (e) => { c.userData.handedness = e.data && e.data.handedness; });
+        c.addEventListener('disconnected', () => { c.userData.handedness = null; });
         c.addEventListener('selectstart', () => { state.ctrlPressStart = Date.now(); });
         c.addEventListener('selectend', () => {
           if (Date.now() - state.ctrlPressStart >= 3000) {
-            state.selectedCtrlIdx = state.selectedCtrlIdx === 0 ? 1 : 0;
-            state.activeController = controllers[state.selectedCtrlIdx];
+            const other = controllers.find(x => x !== c);
+            state.activeHandedness = (other && other.userData.handedness) || (c.userData.handedness === 'left' ? 'right' : 'left');
+            state.activeController = resolveActiveController();
             triggerConfetti(state.activeController);
           }
         });
       });
+    }
+    // Looks up whichever CURRENT controller slot matches the selected physical
+    // hand, instead of trusting a slot index that may have been silently
+    // reassigned to the other hand since selection. Falls back to whatever's
+    // visible if handedness briefly isn't reported (some runtimes omit it for
+    // a frame or two right after a reconnect).
+    function resolveActiveController() {
+      if (state.activeHandedness) {
+        const match = controllers.find(c => c.userData.handedness === state.activeHandedness);
+        if (match) return match;
+      }
+      return state.activeController || controllers.find(c => c.visible) || null;
     }
     function processControllerSelection() {
       if (!state.isControllerSelection) return;
@@ -640,6 +670,7 @@
     function confirmController(idx) {
       state.isControllerSelection = false;
       state.selectedCtrlIdx = idx;
+      state.activeHandedness = controllers[idx] && controllers[idx].userData.handedness;
       state.activeController = controllers[idx];
       triggerConfetti(state.activeController);
       document.getElementById('death-sound').play().catch(() => {});
@@ -663,6 +694,7 @@
       } else clapStart = 0;
     }
     function handleSteering() {
+      state.activeController = resolveActiveController();
       if (!state.activeController || !state.isPlaying) return;
       _euler.setFromQuaternion(state.activeController.quaternion);
 
