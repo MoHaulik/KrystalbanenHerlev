@@ -629,7 +629,13 @@
         c.addEventListener('disconnected', () => { c.userData.handedness = null; });
         c.addEventListener('selectstart', () => { state.ctrlPressStart = Date.now(); });
         c.addEventListener('selectend', () => {
-          if (Date.now() - state.ctrlPressStart >= 3000) {
+          // Raised from 3s -- a plain 3-second hold is well within range of a
+          // normal pinch/grip during play (leaning on a crystal, a moment of
+          // hesitation, hand-tracking reading a rest position as a hold), and
+          // the only feedback on trigger was a confetti burst easy to miss
+          // mid-game. 8s is long enough that nobody hits it without meaning to,
+          // while still letting staff deliberately hand the game to someone else.
+          if (Date.now() - state.ctrlPressStart >= 8000) {
             const other = controllers.find(x => x !== c);
             state.activeHandedness = (other && other.userData.handedness) || (c.userData.handedness === 'left' ? 'right' : 'left');
             state.activeController = resolveActiveController();
